@@ -593,7 +593,7 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size % 8 == 0 && !alibi_slopes_.has_value();
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
-        q = q.reshape({batch_size, num_heads_k, ngroups, head_size}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size});
+        q = q.reshape({-1, num_heads_k, ngroups, head_size}).transpose(1, 2).reshape({-1, num_heads_k, head_size});
         max_seqlen_q = ngroups;
         num_heads = num_heads_k;
         cu_seqlens_q_d = nullptr;
@@ -617,7 +617,7 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
     } else {
         CHECK_SHAPE(k, num_blocks, page_block_size, num_heads_k, head_size);
         CHECK_SHAPE(v, num_blocks, page_block_size, num_heads_k, head_size);
-        CHECK_SHAPE(block_table, batch_size, max_num_blocks_per_seq);
+        // CHECK_SHAPE(block_table, batch_size, max_num_blocks_per_seq);
     }
 
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
@@ -749,13 +749,13 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
     }
 
     if (seqlenq_ngroups_swapped) {
-        int64_t size_before[] = {batch_size, max_seqlen_q, num_heads_k, head_size};
-        int64_t size_after[] = {batch_size, num_heads_k * max_seqlen_q, head_size};
+        int64_t size_before[] = {-1, max_seqlen_q, num_heads_k, head_size};
+        int64_t size_after[] = {-1, num_heads_k * max_seqlen_q, head_size};
         out = out.reshape(size_before).transpose(1, 2);
         if (out_.has_value()) {
             // NOTE(woosuk): In this case, we should avoid `out.reshape(size_after)` because it causes
             // a redundant clone operation. Instead, we directly copy the result to the `out_` tensor.
-            out_.value().view({batch_size, num_heads_k, max_seqlen_q, head_size}).copy_(out);
+            out_.value().view({-1, num_heads_k, max_seqlen_q, head_size}).copy_(out);
             out = out_.value();
         } else {
             out = out.reshape(size_after);
@@ -763,8 +763,8 @@ mha_varlen_fwd(at::Tensor &q,  // total_q x num_heads x head_size, total_q := \s
         // NOTE(woosuk): The two lines are not needed because out_padded and q_padded are not used.
         // out_padded = out_padded.reshape(size_before).transpose(1, 2).reshape(size_after);
         // q_padded = q_padded.reshape(size_before).transpose(1, 2).reshape(size_after);
-        int64_t lse_size_before[] = {num_heads, batch_size, max_seqlen_q};
-        int64_t lse_size_after[] = {num_heads * max_seqlen_q, batch_size};
+        int64_t lse_size_before[] = {num_heads, -1, max_seqlen_q};
+        int64_t lse_size_after[] = {num_heads * max_seqlen_q, -1};
         softmax_lse = softmax_lse.reshape(lse_size_before).transpose(1, 2).reshape(lse_size_after);
     }
 
